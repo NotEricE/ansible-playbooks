@@ -1,0 +1,130 @@
+---
+
+- name: "Basic switch setup"
+  hosts: switches
+  gather_facts: false
+  connection: network_cli
+
+# Creating all the variables that are going to be looped through in task.
+  vars:
+    vlans:
+      - "10"
+      - "20"
+      - "30"
+      - "40"
+    
+    vlan_names:
+      - "Host"
+      - "Voip"
+      - "Wifi"
+      - "Guest"
+    
+    ipv4_addresses:
+      - "192.168.2.2/24"
+      - "192.168.3.2/24"
+      - "192.168.4.2/24"
+      - "192.168.5.2/24"
+
+    vlan_interfaces:
+      - "vlan10"
+      - "vlan20"
+      - "vlan30"
+      - "vlan40"
+
+    etherchannel:
+      - "Port-channel1"
+      - "Port-channel3"
+      - "Port-channel4"
+
+  tasks:
+# This is where vlans 10 - 40 are going to be created and named.
+    - name: "VLAN Creation"
+      cisco.ios.ios_vlans:
+        config:
+          - vlan_id: "{{ item.0 }}"
+            name: "{{ item.1 }}"
+            shutdown: disabled
+      loop: "{{ vlans | zip(vlan_names) | list }}"
+      tags: "vlans"
+
+# Vlan interfaces are getting assigned ip addresses in order to be setup svi (for layer3 capable swithces only)
+    - name: "Vlan ip address assignment"
+      cisco.ios.ios_l3_interfaces:
+        config:
+          - name: "{{ item.0 }}"
+            ipv4:
+            - address: "{{ item.1 }}"
+      loop: "{{ vlan_interfaces | zip(ipv4_addresses) | list }}"
+      tags: "vlans-l3"
+
+# Creating lag ports for redundantcy and higher bandwidth. these ports will be set to "active" in order to achieve an lacp connections
+    - name: "LACP Active Ports"
+      cisco.ios.ios_lag_interfaces:
+        config:
+          - name: Port-channel1
+            members:
+            - member: gigabitethernet0/0
+              mode: active
+            - member: gigabitethernet0/1
+              mode: active
+          - name: Port-channel3
+            members:
+            - member: gigabitethernet0/3
+              mode: active
+            - member: gigabitethernet1/0
+              mode: active
+          - name: Port-channel4
+            members:
+            - member: gigabitethernet1/1
+              mode: active
+            - member: gigabitethernet1/2
+              mode: active
+      tags: "lag-active"
+
+# Setting the lag ports to trunk for vlan cross communication
+    - name: "Configure trunk settings"
+      cisco.ios.ios_l2_interfaces:
+        config:
+          mode: "trunk"
+          name: "{{ item }}"
+          trunk:
+            encapsulation: dot1q
+            allowed_vlans: 10-40
+      loop: "{{ etherchannel }}"
+      tags: "lag-active"
+      
+# Creating lag ports for redundantcy and higher bandwidth. these ports will be set to "passive" in order to achieve an lacp connections
+    - name: "LACP Passive Ports"
+      cisco.ios.ios_lag_interfaces:
+        config:
+          - name: Port-channel1
+            members:
+            - member: gigabitethernet0/0
+              mode: passive
+            - member: gigabitethernet0/1
+              mode: passive
+          - name: Port-channel3
+            members:
+            - member: gigabitethernet0/3
+              mode: passive
+            - member: gigabitethernet1/0
+              mode: passive
+          - name: Port-channel4
+            members:
+            - member: gigabitethernet1/1
+              mode: passive
+            - member: gigabitethernet1/2
+              mode: passive
+      tags: "lag-passive"
+
+# Setting the lag ports to trunk for vlan cross communication
+    - name: "Configure trunk settings"
+      cisco.ios.ios_l2_interfaces:
+        config:
+          mode: "trunk"
+          name: "{{ item }}"
+          trunk:
+            encapsulation: dot1q
+            allowed_vlans: 10-40
+      loop: "{{ etherchannel }}"
+      tags: "lag-passive"
